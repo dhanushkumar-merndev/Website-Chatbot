@@ -13,6 +13,9 @@ import * as authSchema from '../auth/schema';
       useFactory: (configService: ConfigService) => {
         const pool = new Pool({
           connectionString: configService.getOrThrow('DATABASE_URL'),
+          max: 20, // Optimized for concurrency
+          idleTimeoutMillis: 30000,
+          connectionTimeoutMillis: 2000,
         });
         return drizzle(pool, {
           schema: {

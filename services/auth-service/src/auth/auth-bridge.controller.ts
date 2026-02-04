@@ -6,17 +6,23 @@ import {
   Res,
   Body,
   UnauthorizedException,
+  Inject,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { AuthService } from '@mguay/nestjs-better-auth';
 import { ConfigService } from '@nestjs/config';
+import * as authSchema from './schema';
+import { eq } from 'drizzle-orm';
+import { DATABASE_CONNECTION } from '../database/database-connection';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 
 @Controller('api/bridge/auth')
 export class AuthBridgeController {
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
+    @Inject(DATABASE_CONNECTION) private readonly database: NodePgDatabase<typeof authSchema>,
   ) {}
 
   onModuleInit() {
@@ -45,6 +51,18 @@ export class AuthBridgeController {
       throw new UnauthorizedException('Not authenticated');
     }
 
+    // Attach user to request for LoggingInterceptor
+    const accounts = await this.database.query.account.findMany({
+      where: eq(authSchema.account.userId, session.user.id),
+    });
+    // If no accounts are linked, it's an email/password or email OTP login
+    const provider = accounts.length > 0 
+      ? accounts.map(a => a.providerId).join(',') 
+      : 'email';
+
+    (req as any).user = session.user;
+    (req as any).provider = provider;
+
     const token = jwt.sign(
       {
         sub: session.user.id,
@@ -66,12 +84,31 @@ export class AuthBridgeController {
       ...(domain && { domain }),
     });
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     return res.json({ ok: true, user: session.user });
   }
 
   // 🚪 LOGOUT
   @Get('logout')
   async logout(@Req() req: Request, @Res() res: Response) {
+    const session = await this.authService.instance.api.getSession({
+      headers: req.headers as any,
+    });
+    
+    if (session?.user) {
+      
+      const accounts = await this.database.query.account.findMany({
+        where: eq(authSchema.account.userId, session.user.id),
+      });
+      // Fallback to 'email' if no social accounts linked
+      const provider = accounts.length > 0 
+        ? accounts.map(a => a.providerId).join(',') 
+        : 'email';
+
+      (req as any).user = session.user;
+      (req as any).provider = provider;
+    }
+
     await this.authService.instance.api.signOut({
       headers: req.headers as any,
     });
@@ -87,6 +124,7 @@ export class AuthBridgeController {
     res.clearCookie('better-auth.session_token', cookieOptions);
     res.clearCookie('better-auth.session_token', { ...cookieOptions, secure: true });
 
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     return res.json({ ok: true });
   }
 

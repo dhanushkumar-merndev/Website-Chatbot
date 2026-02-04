@@ -14,7 +14,7 @@ export class LoggingInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
-    const { method, url, body, query, params } = request;
+    const { method, url } = request;
     const now = Date.now();
 
     return next.handle().pipe(
@@ -23,14 +23,25 @@ export class LoggingInterceptor implements NestInterceptor {
           const response = context.switchToHttp().getResponse();
           const statusCode = response.statusCode;
           const delay = Date.now() - now;
-          this.logger.log(
-            `${method} ${url} ${statusCode} - ${delay}ms`
-          );
+
+          // Resolve user: Check request (standard), then response data (bridge sync)
+          const userEmail = request.user?.email || data?.user?.email || 'anonymous';
+          const provider = request.provider || data?.session?.provider || 'unknown';
+
+          let logMessage = `${method} ${url} ${statusCode} - ${delay}ms`;
+
+          // Omit user details for logout since the session is being cleared
+          if (!url.includes('/logout')) {
+            logMessage += ` [user: ${userEmail}] [provider: ${provider}]`;
+          }
+
+          this.logger.log(logMessage);
         },
         error: (err) => {
           const delay = Date.now() - now;
+          const userEmail = request.user?.email || 'anonymous';
           this.logger.error(
-            `${method} ${url} ${err.status || 500} - ${delay}ms`
+            `${method} ${url} ${err.status || 500} - ${delay}ms [user: ${userEmail}]`
           );
         },
       }),
