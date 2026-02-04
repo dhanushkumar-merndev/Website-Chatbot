@@ -100,12 +100,89 @@ const envSchema = z.object({
                                     to: email,
                                     subject: `Verify your email`,
                                     html: `
-                      <div style="font-family: sans-serif; padding: 20px; color: #333;">
-                        <h2>WebiChat Verification</h2>
-                        <p>Your verification code is:</p>
-                        <h1 style="color: #2563eb; letter-spacing: 2px;">${otp}</h1>
-                        <p>This code will expire in 5 minutes.</p>
-                      </div>
+                                    <div style="
+                                            max-width: 480px;
+                                            margin: 40px auto;
+                                            padding: 32px 24px;
+                                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+                                            background-color: #ffffff;
+                                            color: #000000;
+                                            border-radius: 14px;
+                                            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+                                            border: 1px solid #e6e6e6;
+                                            ">
+
+                                            <!-- Header -->
+                                            <h2 style="
+                                                margin: 0 0 24px 0;
+                                                font-size: 22px;
+                                                font-weight: 600;
+                                                text-align: center;
+                                            ">
+                                                WebiChat Verification
+                                            </h2>
+
+                                            <!-- Message -->
+                                            <p style="
+                                                font-size: 14px;
+                                                line-height: 1.6;
+                                                margin: 0 0 20px 0;
+                                                text-align: center;
+                                            ">
+                                                Use the verification code below to sign in.
+                                            </p>
+
+                                            <!-- OTP Box -->
+                                            <div style="
+                                                margin: 24px auto;
+                                                padding: 18px 0;
+                                                width: 100%;
+                                                max-width: 260px;
+                                                border: 2px solid #000000;
+                                                border-radius: 10px;
+                                                text-align: center;
+                                                box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+                                            ">
+                                                <span style="
+                                                display: block;
+                                                font-size: 28px;
+                                                font-weight: 700;
+                                                letter-spacing: 6px;
+                                                ">
+                                                ${otp}
+                                                </span>
+                                            </div>
+
+                                            <!-- Expiry -->
+                                            <p style="
+                                                font-size: 13px;
+                                                color: #555555;
+                                                margin: 0 0 28px 0;
+                                                text-align: center;
+                                            ">
+                                                This code expires in <strong>5 minutes</strong>.
+                                            </p>
+
+                                            <!-- Divider -->
+                                            <div style="
+                                                height: 1px;
+                                                background-color: #e6e6e6;
+                                                margin: 24px 0;
+                                            "></div>
+
+                                            <!-- Footer -->
+                                            <p style="
+                                                font-size: 12px;
+                                                color: #777777;
+                                                line-height: 1.5;
+                                                text-align: center;
+                                                margin: 0;
+                                            ">
+                                                If you didn’t request this code, you can safely ignore this email.
+                                            </p>
+
+                                            </div>
+
                     `,
                                 });
                             } catch (e) {
