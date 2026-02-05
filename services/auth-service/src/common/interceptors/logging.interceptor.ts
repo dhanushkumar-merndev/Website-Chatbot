@@ -4,44 +4,68 @@ import {
   ExecutionContext,
   CallHandler,
   Logger,
+  HttpException,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import type { Response } from 'express';
+import { AuthenticatedRequest } from 'src/types/auth-request';
 
 @Injectable()
-export class LoggingInterceptor implements NestInterceptor {
-  private readonly logger = new Logger('HTTP');
+export class LoggingInterceptor<T = unknown>
+  implements NestInterceptor<T, T>
+{
+  private readonly logger = new Logger(LoggingInterceptor.name);
 
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
-    const request = context.switchToHttp().getRequest();
+  intercept(
+    context: ExecutionContext,
+    next: CallHandler<T>,
+  ): Observable<T> {
+    const httpCtx = context.switchToHttp();
+    const request = httpCtx.getRequest<AuthenticatedRequest>();
+    const response = httpCtx.getResponse<Response>();
+
     const { method, url } = request;
-    const now = Date.now();
+    const start = Date.now();
 
     return next.handle().pipe(
       tap({
         next: (data) => {
-          const response = context.switchToHttp().getResponse();
           const statusCode = response.statusCode;
-          const delay = Date.now() - now;
+          const duration = Date.now() - start;
 
-          // Resolve user: Check request (standard), then response data (bridge sync)
-          const userEmail = request.user?.email || data?.user?.email || 'anonymous';
-          const provider = request.provider || data?.session?.provider || 'unknown';
+          const userEmail =
+            request.user?.email ??
+            (data as any)?.user?.email ??
+            'anonymous';
 
-          let logMessage = `${method} ${url} ${statusCode} - ${delay}ms`;
+          const provider =
+            request.provider ??
+            (data as any)?.session?.provider ??
+            'unknown';
 
-          // Omit user details for logout since the session is being cleared
+          let message = `${method} ${url} ${statusCode} - ${duration}ms`;
+
           if (!url.includes('/logout')) {
-            logMessage += ` [user: ${userEmail}] [provider: ${provider}]`;
+            message += ` [user: ${userEmail}] [provider: ${provider}]`;
           }
 
-          this.logger.log(logMessage);
+          this.logger.log(message);
         },
-        error: (err) => {
-          const delay = Date.now() - now;
-          const userEmail = request.user?.email || 'anonymous';
+        error: (err: unknown) => {
+          const duration = Date.now() - start;
+
+          const statusCode =
+            err instanceof HttpException
+              ? err.getStatus()
+              : 500;
+
+          const userEmail =
+            request.user?.email ?? 'anonymous';
+
           this.logger.error(
-            `${method} ${url} ${err.status || 500} - ${delay}ms [user: ${userEmail}]`
+            `${method} ${url} ${statusCode} - ${duration}ms [user: ${userEmail}]`,
+            err instanceof Error ? err.stack : undefined,
           );
         },
       }),

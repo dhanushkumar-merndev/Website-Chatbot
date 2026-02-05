@@ -5,7 +5,9 @@ import { Controller, Get, UseGuards } from '@nestjs/common';
 @UseGuards(nestjsBetterAuth.AuthGuard)
 export class UsersController {
   @Get('session')
-  async getSession(@nestjsBetterAuth.Session() session: nestjsBetterAuth.UserSession) {
+  async getSession(
+    @nestjsBetterAuth.Session() session: nestjsBetterAuth.UserSession,
+  ) {
     return session;
   }
 }

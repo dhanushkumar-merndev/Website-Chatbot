@@ -8,139 +8,159 @@ import {
   UnauthorizedException,
   Inject,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
+import type { Response } from 'express';
+import jwt, { JwtPayload } from 'jsonwebtoken';
 import { AuthService } from '@mguay/nestjs-better-auth';
 import { ConfigService } from '@nestjs/config';
 import * as authSchema from './schema';
 import { eq } from 'drizzle-orm';
 import { DATABASE_CONNECTION } from '../database/database-connection';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+import { AuthenticatedRequest } from 'src/types/auth-request';
+
+
+interface ServiceJwtPayload extends JwtPayload {
+  sub: string;
+  email: string;
+  name?: string | null;
+}
 
 @Controller('api/bridge/auth')
 export class AuthBridgeController {
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
-    @Inject(DATABASE_CONNECTION) private readonly database: NodePgDatabase<typeof authSchema>,
+    @Inject(DATABASE_CONNECTION)
+    private readonly database: NodePgDatabase<typeof authSchema>,
   ) {}
 
-  onModuleInit() {
-    // Controller initialized
+  private getCookieOptions() {
+    const domain = this.configService.get<string>('COOKIE_DOMAIN');
+    return {
+      path: '/',
+      httpOnly: true,
+      ...(domain && { domain }),
+    };
   }
 
   // 🔗 SESSION → SERVICE JWT
   @Get('_sync')
-  async sync(@Req() req: Request, @Res() res: Response) {
+  async sync(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const session = await this.authService.instance.api.getSession({
-      headers: req.headers as any,
+      headers: req.headers as Record<string, string>,
     });
 
     if (!session?.user) {
-      const domain = this.configService.get<string>('COOKIE_DOMAIN');
-      const cookieOptions = {
-        path: '/',
-        ...(domain && { domain }),
-        httpOnly: true,
-      };
-      
+      const cookieOptions = this.getCookieOptions();
       res.clearCookie('service_token', cookieOptions);
       res.clearCookie('better-auth.session_token', cookieOptions);
-      res.clearCookie('better-auth.session_token', { ...cookieOptions, secure: true });
-
       throw new UnauthorizedException('Not authenticated');
     }
 
-    // Attach user to request for LoggingInterceptor
     const accounts = await this.database.query.account.findMany({
       where: eq(authSchema.account.userId, session.user.id),
     });
-    // If no accounts are linked, it's an email/password or email OTP login
-    const provider = accounts.length > 0 
-      ? accounts.map(a => a.providerId).join(',') 
-      : 'email';
 
-    (req as any).user = session.user;
-    (req as any).provider = provider;
+    const provider =
+      accounts.length > 0
+        ? accounts.map((a) => a.providerId).join(',')
+        : 'email';
 
-    const token = jwt.sign(
-      {
-        sub: session.user.id,
-        email: session.user.email,
-        name: session.user.name,
-      },
-      this.configService.get<string>('SERVICE_JWT_SECRET')!,
-      { expiresIn: '7d' },
-    );
+    req.user = session.user;
+    req.provider = provider;
 
-    const isProd = this.configService.get('NODE_ENV') === 'production';
-    const domain = this.configService.get<string>('COOKIE_DOMAIN');
+    const secret = this.configService.get<string>('SERVICE_JWT_SECRET');
+    if (!secret) {
+      throw new Error('SERVICE_JWT_SECRET is not configured');
+    }
+
+    const payload: ServiceJwtPayload = {
+      sub: session.user.id,
+      email: session.user.email,
+      name: session.user.name,
+    };
+
+    const token = jwt.sign(payload, secret, { expiresIn: '7d' });
 
     res.cookie('service_token', token, {
-      httpOnly: true,
-      secure: isProd,
+      ...this.getCookieOptions(),
+      secure: this.configService.get('NODE_ENV') === 'production',
       sameSite: 'lax',
-      path: '/',
-      ...(domain && { domain }),
     });
 
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    return res.json({ ok: true, user: session.user });
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    );
+
+    return { ok: true, user: session.user };
   }
 
   // 🚪 LOGOUT
   @Get('logout')
-  async logout(@Req() req: Request, @Res() res: Response) {
+  async logout(
+    @Req() req: AuthenticatedRequest,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const session = await this.authService.instance.api.getSession({
-      headers: req.headers as any,
+      headers: req.headers as Record<string, string>,
     });
-    
+
     if (session?.user) {
-      
       const accounts = await this.database.query.account.findMany({
         where: eq(authSchema.account.userId, session.user.id),
       });
-      // Fallback to 'email' if no social accounts linked
-      const provider = accounts.length > 0 
-        ? accounts.map(a => a.providerId).join(',') 
-        : 'email';
 
-      (req as any).user = session.user;
-      (req as any).provider = provider;
+      req.user = session.user;
+      req.provider =
+        accounts.length > 0
+          ? accounts.map((a) => a.providerId).join(',')
+          : 'email';
     }
 
     await this.authService.instance.api.signOut({
-      headers: req.headers as any,
+      headers: Object.fromEntries(
+        Object.entries(req.headers).filter(
+          ([, value]) => typeof value === 'string',
+        ),
+      ) as Record<string, string>,
     });
 
-    const domain = this.configService.get<string>('COOKIE_DOMAIN');
-    const cookieOptions = {
-      path: '/',
-      ...(domain && { domain }),
-      httpOnly: true,
-    };
-
+    const cookieOptions = this.getCookieOptions();
     res.clearCookie('service_token', cookieOptions);
     res.clearCookie('better-auth.session_token', cookieOptions);
-    res.clearCookie('better-auth.session_token', { ...cookieOptions, secure: true });
 
-    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    return res.json({ ok: true });
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate',
+    );
+
+    return { ok: true };
   }
 
   // 🔍 CHECK AUTH PROVIDER
   @Post('check-provider')
-  async checkProvider(@Body('email') email: string) {
-    try {
-      const result = await (this.authService.instance.api as any).listUsers({
-        query: [{ field: 'email', value: email, operator: 'eq' }],
+    async checkProvider(@Body('email') email: string) {
+      const user = await this.database.query.user.findFirst({
+        where: eq(authSchema.user.email, email),
       });
 
-      return result?.users?.length
-        ? { provider: 'email' }
-        : { provider: 'none' };
-    } catch {
-      return { provider: 'none' };
+      if (!user) {
+        return { provider: 'none' };
+      }
+
+      const accounts = await this.database.query.account.findMany({
+        where: eq(authSchema.account.userId, user.id),
+      });
+
+      return {
+        provider:
+          accounts.length > 0
+            ? accounts.map((a) => a.providerId).join(',')
+            : 'email',
+      };
     }
-  }
 }
